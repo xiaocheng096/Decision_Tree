@@ -383,6 +383,7 @@ function toast(msg){
   clearTimeout(toast._t); toast._t = setTimeout(function(){ t.classList.remove('show'); }, 2400);
 }
 function setStatus(s){ $('#status-line').textContent = s; }
+function hideTreeSkeleton(){ var s = $('#tree-skeleton'); if(s) s.style.display = 'none'; }
 
 function renderDatasetSwitch(){
   var html = '';
@@ -403,6 +404,7 @@ function switchDataset(key){
   $('#result-content').style.display = 'none';
   $('#result-empty').style.display = 'flex';
   $('#tree-image').src = MODEL.svg.base;
+  if($('#tree-image').complete) hideTreeSkeleton();
   renderModel();
   renderDatasetSwitch();
   setStatus('已切换到「' + MODEL.dataset.name + '」· 单文件离线模型');
@@ -430,6 +432,7 @@ function renderModel(){
   renderClasses();
   renderDict();
   $('#tree-image').src = MODEL.svg.base;
+  if($('#tree-image').complete) hideTreeSkeleton();
   $('#tree-hint-text').textContent = '金色路径为最近一次推演 · 节点 ' + s.nodes + ' / 叶节点 ' + s.leaves + ' / 深度 ' + s.depth + ' / 剪枝 ' + s.pruned;
 }
 
@@ -594,7 +597,8 @@ document.addEventListener('DOMContentLoaded', function(){
   $('#zoom-in').addEventListener('click', function(){ setZoom(state.zoom + .15); });
   $('#zoom-out').addEventListener('click', function(){ setZoom(state.zoom - .15); });
   $('#zoom-fit').addEventListener('click', function(){ setZoom(1); });
-  $('#tree-image').addEventListener('load', function(){ var s = $('#tree-img-skeleton'); if(s) s.style.display = 'none'; });
+  $('#tree-image').addEventListener('load', hideTreeSkeleton);
+  $('#tree-image').addEventListener('error', hideTreeSkeleton);
   Array.prototype.forEach.call(document.querySelectorAll('.nav a'), function(a){
     a.addEventListener('click', function(){
       Array.prototype.forEach.call(document.querySelectorAll('.nav a'), function(x){ x.classList.remove('active'); });
