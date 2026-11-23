@@ -148,9 +148,13 @@ section{position:relative}
 .tree-tools .fit{width:auto;padding:0 10px;font-size:10.5px}
 .tree-tools span{font-size:10.5px;color:var(--dim);min-width:40px;text-align:center;font-family:'Segoe UI',sans-serif}
 .tree-frame{border:1px solid var(--line);border-radius:20px;background:#08111f;box-shadow:var(--shadow);overflow:hidden;position:relative}
-.tree-scroll{overflow:auto;max-height:730px;background:#08111f}
-.tree-scroll img{display:block;width:100%;min-width:980px;height:auto;transition:width .22s ease}
+.tree-scroll{overflow:auto;max-height:730px;background:#08111f;position:relative;cursor:grab;touch-action:none;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:#2b4f78 #08111f;scrollbar-gutter:stable}
+.tree-scroll.dragging{cursor:grabbing}
+.tree-scroll img{display:block;width:100%;min-width:0;height:auto;user-select:none;-webkit-user-drag:none;pointer-events:none}
 .tree-skeleton{position:absolute;inset:0;display:grid;place-items:center;color:var(--dim);font-size:12px;background:rgba(8,17,31,.85);z-index:2;transition:.3s}
+.tree-gesture{position:absolute;right:10px;bottom:10px;z-index:3;display:inline-flex;align-items:center;gap:6px;font-size:10px;color:#9fc4e8;background:rgba(8,17,31,.78);border:1px solid #23456b;border-radius:999px;padding:5px 10px;backdrop-filter:blur(6px);pointer-events:none}
+.tree-gesture::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--gold);box-shadow:0 0 8px var(--gold)}
+.tree-gesture .g-mobile{display:none}
 .tree-hint{display:flex;align-items:center;gap:9px;font-size:10.8px;color:var(--dim);padding:11px 4px 0}
 .tree-hint i{width:22px;height:2px;background:var(--gold);display:inline-block;box-shadow:0 0 8px rgba(255,209,102,.5)}
 .data-grid{display:grid;grid-template-columns:1.22fr .78fr;gap:22px}
@@ -197,6 +201,11 @@ footer .wrap{display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap}
  .wrap{padding:0 16px}.topbar .wrap{height:64px;gap:10px}.brand{min-width:0}.brand small{display:none}.engine{font-size:0;padding:8px;gap:0}
  .hero{padding:48px 0 20px}h1{font-size:38px}.hero-stats{grid-template-columns:repeat(2,1fr)}
  .section-head{display:block}.tree-tools{margin-top:14px;width:max-content}
+ .tree-scroll{max-height:64vh;min-height:260px}
+ .tree-tools button{width:38px;height:38px;font-size:18px}
+ .tree-tools span{min-width:44px}
+ .tree-gesture{font-size:9.5px;padding:4px 8px;right:8px;bottom:8px}
+ .tree-gesture .g-desktop{display:none}.tree-gesture .g-mobile{display:inline}
  .panel-head,.form-hint,.features,.sample-row,.status-line{padding-left:18px;padding-right:18px}
  .primary{width:calc(100% - 36px);margin-left:18px;margin-right:18px}
  .result-content{padding:20px 18px}.result-name{font-size:31px}.ring{width:78px;height:78px}
@@ -304,6 +313,7 @@ footer .wrap{display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap}
     </div>
     <div class="tree-frame">
       <div class="tree-skeleton" id="tree-skeleton">正在绘制决策树……</div>
+      <div class="tree-gesture"><span class="g-desktop">拖动平移 · 滚轮 / 按钮缩放</span><span class="g-mobile">单指拖动 · 双指缩放</span></div>
       <div class="tree-scroll" id="tree-scroll"><img id="tree-image" alt="决策树结构图"></div>
     </div>
     <div class="tree-hint"><i></i><span id="tree-hint-text">推演后，金色路径将在这里高亮显示。</span></div>
@@ -403,8 +413,12 @@ function switchDataset(key){
   state.values = MODEL.features.map(function(){ return 0; });
   $('#result-content').style.display = 'none';
   $('#result-empty').style.display = 'flex';
+  state.zoom = 1;
   $('#tree-image').src = MODEL.svg.base;
   if($('#tree-image').complete) hideTreeSkeleton();
+  var tv = treeViewport();
+  if(tv){ tv.scrollLeft = 0; tv.scrollTop = 0; }
+  applyZoom(1);
   renderModel();
   renderDatasetSwitch();
   setStatus('已切换到「' + MODEL.dataset.name + '」· 单文件离线模型');
@@ -584,10 +598,107 @@ function reset(){
   setStatus('已重置 · 单文件离线模型待命');
 }
 
-function setZoom(z){
-  state.zoom = Math.max(.7, Math.min(2, z));
-  $('#tree-image').style.width = (state.zoom * 100) + '%';
-  $('#zoom-label').textContent = Math.round(state.zoom * 100) + '%';
+function treeViewport(){ return $('#tree-scroll'); }
+function treeBaseWidth(){ var v = treeViewport(); return Math.max(1, v ? v.clientWidth : 1); }
+
+function applyZoom(z, focal){
+  var v = treeViewport(), img = $('#tree-image');
+  if(!v || !img || !isFinite(z)) return;
+  var min = 0.75, max = 4;
+  z = Math.max(min, Math.min(max, z));
+  var oldRect = img.getBoundingClientRect();
+  var oldW = oldRect.width || treeBaseWidth();
+  var oldH = oldRect.height || 1;
+  var rect = v.getBoundingClientRect();
+  var fx = focal ? focal.x - rect.left : v.clientWidth / 2;
+  var fy = focal ? focal.y - rect.top : v.clientHeight / 2;
+  fx = Math.max(0, Math.min(v.clientWidth, fx));
+  fy = Math.max(0, Math.min(v.clientHeight, fy));
+  var rx = (v.scrollLeft + fx) / oldW;
+  var ry = (v.scrollTop + fy) / oldH;
+  state.zoom = z;
+  var w = Math.round(treeBaseWidth() * z);
+  img.style.width = w + 'px';
+  var newH = img.getBoundingClientRect().height || oldH;
+  v.scrollLeft = rx * w - fx;
+  v.scrollTop = ry * newH - fy;
+  $('#zoom-label').textContent = Math.round(z * 100) + '%';
+}
+
+function setZoom(z){ applyZoom(z); }
+
+function fitTree(){
+  state.zoom = 1;
+  var v = treeViewport();
+  applyZoom(1);
+  if(v){ v.scrollLeft = 0; v.scrollTop = 0; }
+}
+
+function initTreeGestures(){
+  var v = treeViewport();
+  if(!v) return;
+  var pointers = {}, drag = null, pinch = 0;
+  function count(){ return Object.keys(pointers).length; }
+  function firstTwo(){
+    var ids = Object.keys(pointers);
+    return [pointers[ids[0]], pointers[ids[1]]];
+  }
+  v.addEventListener('pointerdown', function(e){
+    if(e.pointerType === 'mouse' && e.button !== 0) return;
+    pointers[e.pointerId] = {x:e.clientX, y:e.clientY};
+    if(count() === 1){
+      drag = {x:e.clientX, y:e.clientY, left:v.scrollLeft, top:v.scrollTop};
+      v.classList.add('dragging');
+      try{ v.setPointerCapture(e.pointerId); }catch(err){}
+    } else if(count() === 2){
+      drag = null;
+      var p = firstTwo();
+      pinch = Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y);
+    }
+  });
+  v.addEventListener('pointermove', function(e){
+    if(!pointers[e.pointerId]) return;
+    pointers[e.pointerId] = {x:e.clientX, y:e.clientY};
+    if(count() >= 2){
+      var p = firstTwo();
+      var dist = Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y);
+      if(pinch > 0 && dist > 0){
+        applyZoom(state.zoom * (dist / pinch), {x:(p[0].x + p[1].x) / 2, y:(p[0].y + p[1].y) / 2});
+      }
+      pinch = dist;
+      e.preventDefault();
+      return;
+    }
+    if(!drag) return;
+    v.scrollLeft = drag.left - (e.clientX - drag.x);
+    v.scrollTop = drag.top - (e.clientY - drag.y);
+    e.preventDefault();
+  });
+  function release(e){
+    if(pointers[e.pointerId]) delete pointers[e.pointerId];
+    if(count() === 0){
+      drag = null; pinch = 0;
+      v.classList.remove('dragging');
+    } else if(count() === 1){
+      var id = Object.keys(pointers)[0], p = pointers[id];
+      drag = {x:p.x, y:p.y, left:v.scrollLeft, top:v.scrollTop};
+      pinch = 0;
+    }
+  }
+  v.addEventListener('pointerup', release);
+  v.addEventListener('pointercancel', release);
+  v.addEventListener('lostpointercapture', release);
+  v.addEventListener('wheel', function(e){
+    if(e.ctrlKey || e.metaKey){
+      e.preventDefault();
+      applyZoom(state.zoom * (e.deltaY < 0 ? 1.12 : 1 / 1.12), {x:e.clientX, y:e.clientY});
+    }
+  }, {passive:false});
+  var rt;
+  window.addEventListener('resize', function(){
+    clearTimeout(rt);
+    rt = setTimeout(function(){ applyZoom(state.zoom); }, 120);
+  });
 }
 
 document.addEventListener('DOMContentLoaded', function(){
@@ -596,9 +707,13 @@ document.addEventListener('DOMContentLoaded', function(){
   $('#reset-btn').addEventListener('click', reset);
   $('#zoom-in').addEventListener('click', function(){ setZoom(state.zoom + .15); });
   $('#zoom-out').addEventListener('click', function(){ setZoom(state.zoom - .15); });
-  $('#zoom-fit').addEventListener('click', function(){ setZoom(1); });
-  $('#tree-image').addEventListener('load', hideTreeSkeleton);
+  $('#zoom-fit').addEventListener('click', fitTree);
+  $('#tree-image').addEventListener('load', function(){
+    hideTreeSkeleton();
+    if(!$('#tree-image').style.width) applyZoom(state.zoom);
+  });
   $('#tree-image').addEventListener('error', hideTreeSkeleton);
+  initTreeGestures();
   Array.prototype.forEach.call(document.querySelectorAll('.nav a'), function(a){
     a.addEventListener('click', function(){
       Array.prototype.forEach.call(document.querySelectorAll('.nav a'), function(x){ x.classList.remove('active'); });
